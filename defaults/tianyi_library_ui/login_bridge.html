@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Freedeck 天翼登录</title>
+  <style>
+    :root {
+      /* Material 3 dark tokens */
+      --md-bg: #000000;
+      --md-surface: #121212;
+      --md-surface-container: #1c1b1f;
+      --md-outline: #938f99;
+      --md-on-bg: #e6e1e5;
+      --md-on-surface-variant: #cac4d0;
+      --md-primary: #d0bcff;
+      --md-on-primary: #381e72;
+      --md-primary-container: #4f378b;
+      --md-on-primary-container: #eaddff;
+      --md-error: #f2b8b5;
+      --md-warn: #f6c26b;
+      --md-ok: #9bd7a8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--md-bg);
+      color: var(--md-on-bg);
+      font-family: "Roboto", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .page {
+      min-height: 100vh;
+      width: min(1200px, calc(100vw - 48px));
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+    }
+
+    .layout {
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(240px, 340px) minmax(280px, 1fr);
+      gap: clamp(24px, 4vw, 56px);
+      align-items: center;
+    }
+
+    @media (max-width: 700px) {
+      .page {
+        width: min(1200px, calc(100vw - 24px));
+      }
+
+      .layout {
+        grid-template-columns: 1fr;
+        gap: 28px;
+        padding: 28px 0;
+      }
+    }
+
+    .qr-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .qr-frame {
+      width: min(360px, 72vw);
+      aspect-ratio: 1 / 1;
+      border-radius: 28px;
+      background: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .qr-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .qr-placeholder {
+      color: #1f1b24;
+      font-size: clamp(34px, 6vw, 60px);
+      font-weight: 500;
+      letter-spacing: 0.2px;
+    }
+
+    .qr-tip {
+      margin: 0;
+      color: var(--md-on-surface-variant);
+      font-size: 14px;
+      text-align: center;
+      line-height: 1.45;
+    }
+
+    .right {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: clamp(28px, 3.8vw, 44px);
+      font-weight: 500;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      color: #ffffff;
+    }
+
+    .subtitle {
+      margin: 0;
+      font-size: clamp(20px, 2.8vw, 32px);
+      font-weight: 400;
+      line-height: 1.25;
+      color: var(--md-on-bg);
+    }
+
+    .badge-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+
+    .badge,
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      line-height: 1.3;
+    }
+
+    .badge {
+      border: 1px solid var(--md-outline);
+      color: var(--md-on-surface-variant);
+    }
+
+    .status-chip {
+      background: var(--md-primary-container);
+      color: var(--md-on-primary-container);
+    }
+
+    .badge.pending {
+      color: var(--md-warn);
+      border-color: rgba(246, 194, 107, 0.5);
+    }
+
+    .badge.success {
+      color: var(--md-ok);
+      border-color: rgba(155, 215, 168, 0.5);
+    }
+
+    .badge.failed {
+      color: var(--md-error);
+      border-color: rgba(242, 184, 181, 0.5);
+    }
+
+    .status-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .result-title {
+      margin: 0;
+      font-size: 30px;
+      font-weight: 500;
+      line-height: 1.25;
+      color: #ffffff;
+    }
+
+    .result-hint,
+    .status {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.4;
+      color: var(--md-on-bg);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .status.warn {
+      color: var(--md-warn);
+    }
+
+    .status.danger {
+      color: var(--md-error);
+    }
+
+    .meta {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--md-on-surface-variant);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .actions {
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .md3-button {
+      border: none;
+      border-radius: 999px;
+      min-height: 44px;
+      padding: 0 24px;
+      background: var(--md-primary);
+      color: var(--md-on-primary);
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: 0.1px;
+      cursor: pointer;
+      transition: background-color 0.2s ease, filter 0.2s ease;
+    }
+
+    .md3-button:hover {
+      filter: brightness(1.06);
+    }
+
+    .md3-button:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    details {
+      margin-top: 2px;
+      width: min(560px, 100%);
+    }
+
+    details summary {
+      font-size: 14px;
+      color: var(--md-on-surface-variant);
+      cursor: pointer;
+    }
+
+    pre {
+      margin: 10px 0 0;
+      max-height: 220px;
+      overflow: auto;
+      border-radius: 16px;
+      border: 1px solid rgba(147, 143, 153, 0.45);
+      background: var(--md-surface-container);
+      padding: 12px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--md-on-surface-variant);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="layout">
+      <article class="qr-card">
+        <div class="qr-frame">
+          <span id="qrPlaceholder" class="qr-placeholder">二维码</span>
+          <img id="qrImage" alt="天翼登录二维码" hidden />
+        </div>
+        <p class="qr-tip">请使用天翼云盘 App 扫码并确认登录</p>
+      </article>
+
+      <article class="right">
+        <h1 class="title">欢迎使用Freedeck</h1>
+        <p class="subtitle">请先登录天翼云盘账号</p>
+
+        <div class="badge-row">
+          <div class="badge pending" id="stageBadge">准备中</div>
+          <div class="status-chip" id="resultTitle">正在初始化登录会话...</div>
+        </div>
+
+        <div class="status-group">
+          <p class="result-hint" id="resultHint">请稍候。</p>
+          <p class="status" id="status">正在初始化...</p>
+          <p class="meta" id="meta">正在准备登录...</p>
+        </div>
+
+        <div class="actions">
+          <button id="refreshQrBtn" class="md3-button" type="button">刷新二维码</button>
+        </div>
+
+        <details>
+          <summary>诊断信息</summary>
+          <pre id="diagnostics">(暂无)</pre>
+        </details>
+      </article>
+    </section>
+  </main>
+
+  <script src="./login_bridge.js"></script>
+</body>
+</html>

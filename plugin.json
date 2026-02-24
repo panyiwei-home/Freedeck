@@ -1,0 +1,17 @@
+{
+    "name":  "Freedeck",
+    "author":  "Panyiwei",
+    "flags":  [
+
+              ],
+    "api_version":  1,
+    "publish":  {
+                    "tags":  [
+                                 "file-transfer",
+                                 "network",
+                                 "utility"
+                             ],
+                    "description":  "通过局域网在设备间传输文件到 Steam Deck",
+                    "image":  ""
+                }
+}

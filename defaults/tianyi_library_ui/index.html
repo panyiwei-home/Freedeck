@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Freedeck</title>
+  <link rel="stylesheet" href="/tianyi/library/app.css" />
+</head>
+<body>
+  <main id="app" v-cloak class="page">
+    <section class="hero">
+      <h1 class="brand">Freedeck</h1>
+      <form class="search-bar" @submit.prevent="reloadList(1)">
+        <input
+          id="search-input"
+          v-model="query"
+          :class="{ 'focus-ring': focusedIndex === 0 }"
+          type="text"
+          placeholder="搜索游戏名称"
+          autocomplete="off"
+          aria-label="搜索游戏名称"
+        />
+        <button id="search-button" :class="{ 'focus-ring': focusedIndex === 1 }" type="submit">搜索</button>
+      </form>
+      <p class="hint">{{ hintText }}</p>
+    </section>
+
+    <section class="results" v-if="showResults">
+      <div class="card-grid" v-if="list.items.length > 0">
+        <article
+          :class="['game-card', { 'focus-ring': focusedIndex === idx + 2 }]"
+          v-for="(item, idx) in list.items"
+          :key="item.game_id + item.down_url"
+          :data-card-index="idx"
+          tabindex="0"
+          @click="openInstallConfirm(item)"
+        >
+          <div class="card-media">
+            <img
+              :src="coverFor(item)"
+              :alt="item.title"
+              loading="lazy"
+              @error="onCoverError($event, item)"
+            />
+          </div>
+          <div class="card-info">
+            <h3 class="card-title">{{ item.title }}</h3>
+            <div class="card-meta">
+              <span>{{ item.categories || "未分类" }}</span>
+              <span>{{ item.size_text || "-" }}</span>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <p class="empty" v-else>没有匹配结果</p>
+    </section>
+
+    <p class="toast" v-if="message">{{ message }}</p>
+
+    <section class="modal-mask" v-if="installDialog.visible">
+      <div class="modal-card">
+        <div class="modal-loading" v-if="installDialog.loading">正在读取安装信息...</div>
+
+        <template v-else-if="installDialog.plan">
+          <div class="install-layout">
+            <div class="modal-cover-panel">
+              <div class="cover-art-anchor">
+                <div class="modal-cover-stage">
+                  <p class="cover-stage-caption">Freedeck</p>
+                  <img
+                    class="modal-cover"
+                    :src="coverFor(installDialog.game || installDialog.plan)"
+                    :alt="installDialog.plan.game_title || '游戏封面'"
+                    @error="onCoverError($event, installDialog.game || installDialog.plan)"
+                  />
+                  <p class="cover-stage-tagline">READY FOR INSTALL</p>
+                </div>
+                <div class="cover-size-pill">{{ formatBytesCompact(totalRequiredBytes(installDialog.plan)) }}</div>
+                <div :class="['cover-check-pill', protonBadgeClass(protonTierFor(installDialog.game || installDialog.plan))]">
+                  {{ protonBadgeMark(protonTierFor(installDialog.game || installDialog.plan)) }}
+                </div>
+              </div>
+              <div class="cover-title-stack">
+                <h3 class="modal-title">{{ modalChineseTitle(installDialog.plan.game_title || (installDialog.game && installDialog.game.title) || "") }}</h3>
+                <p class="modal-game-en">{{ modalEnglishTitle(installDialog.plan.game_title || (installDialog.game && installDialog.game.title) || "") }}</p>
+              </div>
+            </div>
+            <div class="modal-side">
+              <p class="modal-sub">确认后自动下载并解压安装</p>
+
+              <div class="space-block">
+                <div class="space-row">
+                  <span>总需空间</span>
+                  <strong>{{ totalRequiredFormula(installDialog.plan) }}</strong>
+                </div>
+                <div class="space-row">
+                  <span>当前可用</span>
+                  <strong>{{ freeSpaceLabel(installDialog.plan) }}</strong>
+                </div>
+                <div class="space-row">
+                  <span>ProtonDB</span>
+                  <strong>{{ protonTierLabel(protonTierFor(installDialog.game || installDialog.plan)) }}</strong>
+                </div>
+              </div>
+
+              <div class="modal-actions">
+                <button
+                  id="install-confirm"
+                  class="btn-primary"
+                  :class="{ 'focus-ring': focusedIndex === 1 }"
+                  :disabled="!modalCanConfirm"
+                  @click="confirmInstall"
+                >
+                  {{ installDialog.submitting ? "提交中..." : "确认安装" }}
+                </button>
+                <button
+                  id="install-cancel"
+                  class="btn-secondary"
+                  :class="{ 'focus-ring': focusedIndex === 0 }"
+                  @click="closeInstallDialog"
+                >
+                  取消安装
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <div class="modal-loading" v-else>无法获取安装信息，请稍后重试。</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/tianyi/library/vue.global.prod.js"></script>
+  <script src="/tianyi/library/app.js"></script>
+</body>
+</html>
