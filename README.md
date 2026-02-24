@@ -12,14 +12,12 @@
 - SteamOS 系统
 
 安装 
- - 进入 Steam Deck 桌面模式
-​
- - 安装 Decky Loader
-​
- - 通过github releases安装本插件​
-
- - 重启插件加载器生效
-
+- 进入 Steam Deck 桌面模式​
+-  安装 Decky Loader​
+-  通过github releases安装本插件​
+-  重启插件加载器生效
+ 
 ## 注意，本插件游戏列表更新随缘，请做好心理准备
+
 
 
