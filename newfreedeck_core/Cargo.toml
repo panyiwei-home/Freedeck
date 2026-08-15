@@ -1,0 +1,19 @@
+[package]
+name = "newfreedeck_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# 零外部依赖 — 纯 std 实现
+# aria2 JSON-RPC 用 TcpStream 手写 HTTP
+# 分卷检测用手写有限状态机 regex
+
+[profile.release]
+lto = true
+strip = "symbols"
+opt-level = "s"
+codegen-units = 1
+panic = "abort"

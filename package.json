@@ -1,37 +1,20 @@
 {
-  "name": "Freedeck",
-  "version": "0.2",
-  "description": "一站式管理学习版游戏",
+  "name": "newfreedeck",
+  "version": "0.1.6",
+  "description": "NewFreedeck decky plugin",
   "type": "module",
   "scripts": {
-    "build": "rollup -c",
-    "watch": "rollup -c -w",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "rollup -c && node -e \"const{cpSync,mkdirSync}=require('fs');const s='defaults/emulator_assets',d='dist/emulator_icons';mkdirSync(d,{recursive:true});cpSync(s,d,{recursive:true})\"",
+    "build:js": "rollup -c",
+    "copy:icons": "node -e \"const{cpSync,mkdirSync}=require('fs');const s='defaults/emulator_assets',d='dist/emulator_icons';try{mkdirSync(d,{recursive:true});cpSync(s,d,{recursive:true})}catch(e){console.error('copy icons failed:',e.message)}\"",
+    "watch": "rollup -c -w"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/SteamDeckHomebrew/decky-plugin-template.git"
-  },
-  "keywords": [
-    "decky",
-    "plugin",
-    "freedeck",
-    "steam-deck",
-    "deck"
-  ],
-  "author": "Panyiwei",
-  "license": "LGPL-2.1",
-  "bugs": {
-    "url": "https://github.com/SteamDeckHomebrew/decky-plugin-template/issues"
-  },
-  "homepage": "https://github.com/SteamDeckHomebrew/decky-plugin-template#readme",
   "devDependencies": {
     "@decky/rollup": "^1.0.2",
     "@decky/ui": "^4.11.0",
-    "@rollup/rollup-linux-x64-musl": "^4.53.3",
+    "@rollup/rollup-linux-x64-gnu": "^4.53.3",
     "@types/react": "19.1.1",
     "@types/react-dom": "19.1.1",
-    "@types/webpack": "^5.28.5",
     "rollup": "^4.53.3",
     "typescript": "^5.6.2"
   },
@@ -42,10 +25,7 @@
   },
   "pnpm": {
     "peerDependencyRules": {
-      "ignoreMissing": [
-        "react",
-        "react-dom"
-      ]
+      "ignoreMissing": ["react", "react-dom"]
     }
   }
 }
