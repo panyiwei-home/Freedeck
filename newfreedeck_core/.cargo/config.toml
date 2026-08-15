@@ -1,0 +1,3 @@
+[target.x86_64-unknown-linux-gnu]
+linker = "rust-lld"
+rustflags = ["-C", "link-args=-L/tmp -L/usr/lib"]

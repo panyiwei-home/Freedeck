@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 96" role="img" aria-label="NDS">
+  <defs>
+    <linearGradient id="ndsBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f3f8f7" />
+      <stop offset="100%" stop-color="#d9e8e4" />
+    </linearGradient>
+    <linearGradient id="ndsAccent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#56b49c" />
+      <stop offset="100%" stop-color="#2f7362" />
+    </linearGradient>
+  </defs>
+  <rect x="6" y="12" width="208" height="72" rx="22" fill="url(#ndsBg)" />
+  <rect x="20" y="26" width="54" height="44" rx="12" fill="#ffffff" stroke="#9ebeb6" stroke-width="4" />
+  <rect x="146" y="26" width="54" height="44" rx="12" fill="#ffffff" stroke="#9ebeb6" stroke-width="4" />
+  <rect x="79" y="30" width="62" height="36" rx="14" fill="url(#ndsAccent)" />
+  <circle cx="173" cy="48" r="7" fill="#56b49c" />
+  <circle cx="47" cy="48" r="8" fill="#2f7362" opacity="0.9" />
+  <path d="M47 39v18M38 48h18" stroke="#ffffff" stroke-width="4" stroke-linecap="round" />
+  <text x="110" y="55" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="20" font-weight="800">NDS</text>
+</svg>

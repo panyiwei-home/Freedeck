@@ -81,9 +81,11 @@
     }
   }
 
-  function gotoLibrary(delayMs) {
+  function showCompletion(delayMs) {
+    // 登录完成后的视觉反馈 — 导航由插件端 QR 轮询或用户手动操作
     window.setTimeout(function () {
-      window.location.href = "/tianyi/library";
+      setResult("completed", "登录完成", "请返回插件继续操作。");
+      setStatus("登录完成，可关闭此页面。", "");
     }, Math.max(0, Number(delayMs || 0)));
   }
 
@@ -117,22 +119,34 @@
     }
   }
 
+  function showQrError(msg) {
+    if (!qrImageEl || !qrPlaceholderEl) return;
+    qrImageEl.hidden = true;
+    qrImageEl.removeAttribute("src");
+    qrPlaceholderEl.hidden = false;
+    qrPlaceholderEl.textContent = msg || "二维码加载失败";
+  }
+
   function updateQrImage(imageUrl, sessionId) {
     const safeUrl = String(imageUrl || "").trim();
     if (!qrImageEl || !qrPlaceholderEl) return;
     if (!safeUrl) {
-      qrImageEl.hidden = true;
-      qrImageEl.removeAttribute("src");
-      qrPlaceholderEl.hidden = false;
-      qrPlaceholderEl.textContent = "二维码准备中...";
+      showQrError("二维码准备中...");
       return;
     }
+
+    qrImageEl.onerror = function () {
+      showQrError("二维码加载失败，请刷新");
+      setStatus("二维码图片获取失败，请点击刷新重试", "danger");
+    };
+    qrImageEl.onload = function () {
+      qrImageEl.hidden = false;
+      qrPlaceholderEl.hidden = true;
+    };
 
     const separator = safeUrl.indexOf("?") >= 0 ? "&" : "?";
     const fullUrl = safeUrl + separator + "session_id=" + encodeURIComponent(sessionId || "");
     qrImageEl.src = fullUrl;
-    qrImageEl.hidden = false;
-    qrPlaceholderEl.hidden = true;
   }
 
   async function apiGet(path) {
@@ -202,7 +216,7 @@
       stopPolling();
       if (!completedOnce) {
         completedOnce = true;
-        gotoLibrary(1000);
+        showCompletion(1000);
       }
       return true;
     }
@@ -311,7 +325,7 @@
       setResult("completed", text, "正在返回游戏列表...");
       setStatus(quick.message || "登录态有效", "");
       renderDiagnostics({ source: "fast_check", user_account: quick.account || "" });
-      gotoLibrary(900);
+      showCompletion(900);
       return;
     }
 
