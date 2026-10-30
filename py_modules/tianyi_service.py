@@ -351,14 +351,55 @@ class TianyiService:
         self._playtime_lock = asyncio.Lock()
         self._playtime_sessions: Dict[str, Dict[str, Any]] = {}
 
+    def _normalize_existing_dir(self, raw_dir: str) -> str:
+        """把一个下载/安装目录解析为"一定存在且可写"的回退路径。
+
+        用于 #19 的容错：当用户配置的目录因外部原因（删除、移动、改卷名）丢失时，
+        不要让它把整个插件拖垮。优先使用原路径，不存在则逐级回退到用户下载目录、
+        插件数据目录，最后到 HOME。
+        """
+        candidate = (raw_dir or "").strip()
+        if candidate:
+            real = os.path.realpath(os.path.expanduser(candidate))
+            if os.path.isdir(real):
+                return real
+        fallbacks = [
+            getattr(self.plugin, "downloads_dir", ""),
+            config.DOWNLOADS_DIR,
+            os.path.join(str(Path.home()), "Downloads"),
+            str(Path.home()),
+        ]
+        seen = set()
+        for fb in fallbacks:
+            fb = (fb or "").strip()
+            if not fb or fb in seen:
+                continue
+            seen.add(fb)
+            real = os.path.realpath(os.path.expanduser(fb))
+            try:
+                os.makedirs(real, exist_ok=True)
+            except Exception:
+                continue
+            if os.path.isdir(real):
+                return real
+        return str(Path.home())
+
     async def initialize(self) -> None:
         """初始化状态与目录。"""
         os.makedirs(os.path.dirname(self.store.state_file), exist_ok=True)
         await asyncio.to_thread(self.store.load)
         await asyncio.to_thread(self.catalog.load)
-        if not self.store.settings.download_dir:
-            default_dir = getattr(self.plugin, "downloads_dir", config.DOWNLOADS_DIR)
-            self.store.set_settings(download_dir=default_dir)
+
+        # #19: 配置过的下载路径若因外部原因（被删除/移动/改卷名）不存在，
+        # 不应直接让整个插件初始化失败。这里做容错：路径缺失时回退到可用目录，
+        # 避免"服务无法初始化 → 插件整体不可用"。
+        resolved_download_dir = self._normalize_existing_dir(
+            self.store.settings.download_dir
+            or getattr(self.plugin, "downloads_dir", config.DOWNLOADS_DIR)
+        )
+        if resolved_download_dir != self.store.settings.download_dir:
+            self.store.set_settings(download_dir=resolved_download_dir)
+
         if not self.store.settings.install_dir:
             default_install = os.path.join(self.store.settings.download_dir or config.DOWNLOADS_DIR, "installed")
             os.makedirs(default_install, exist_ok=True)
@@ -4756,6 +4797,14 @@ class TianyiService:
                         task.status = "error"
                         task.error_reason = str(exc)
                         task.updated_at = _now_wall_ts()
+                else:
+                    # #54: 大文件下载到后半程（如 93%）偶发"校验失败 / 归档校验超时"，
+                    # 根因多为天翼直链（pre-signed URL）有效期较短，下载中途失效后被
+                    # 服务端拒绝/返回损坏数据，aria2 据此报完整性错误。这里在检测到
+                    # 直链相关失败时自动刷新 accessToken + 直链并以继续模式续传，
+                    # 无需用户手动取消重下。
+                    if status == "error" and not task.post_processed:
+                        await self._maybe_refresh_expired_link(task, info)
 
             self._cleanup_tasks(tasks)
             if persist:
@@ -4775,6 +4824,52 @@ class TianyiService:
         self._panel_tasks_cache_at = time.monotonic()
         self._panel_last_active_tasks = self._count_active_tasks(views)
         return views
+
+    # 直链失效/鉴权相关错误特征。命中其一即尝试刷新直链续传（#54）。
+    _EXPIRED_LINK_HINTS = (
+        "checksum", "校验", "完整性", "forbidden", "403", "401",
+        "unauthorized", "expired", "过期", "not found", "404",
+        "token", "signature", "签名", "file not exist", "file does not exist",
+        "下载地址", "直链", "url", "connection", "reset", "broken",
+    )
+
+    async def _maybe_refresh_expired_link(self, task: "TianyiTaskRecord", info: Dict[str, Any]) -> None:
+        """下载中途因直链过期/鉴权失效而失败时，自动刷新直链并续传。"""
+        error_text = " ".join(
+            str(info.get(key, "") or "")
+            for key in ("errorMessage", "errorReason")
+        ).lower()
+        hinted = any(hint in error_text for hint in self._EXPIRED_LINK_HINTS)
+        if not hinted:
+            return
+        # 已完整下载（completedLength 接近 totalLength）则不再续传，交回安装流程。
+        try:
+            total = _safe_int(info.get("totalLength"), 0)
+            completed = _safe_int(info.get("completedLength"), 0)
+        except Exception:
+            total = completed = 0
+        if total > 0 and completed >= total:
+            return
+        try:
+            from tianyi_client import fetch_access_token, fetch_download_url
+
+            access_token = await fetch_access_token(self.store.login.cookie)
+            new_url = await fetch_download_url(
+                self.store.login.cookie,
+                access_token,
+                str(task.share_id or "").strip(),
+                str(task.file_id or "").strip(),
+            )
+            await self.aria2.change_uri(task.gid, new_url)
+            await self.aria2.unpause(task.gid)
+            task.status = "active"
+            task.error_reason = ""
+            task.updated_at = _now_wall_ts()
+            config.logger.info("Refreshed expired download link for task %s", task.task_id)
+        except Exception as exc:
+            config.logger.warning("Refresh expired link failed for %s: %s", task.task_id, exc)
+            task.error_reason = f"直链已失效且刷新失败: {exc}"
+            task.updated_at = _now_wall_ts()
 
     def _schedule_post_process_task(self, task_id: str) -> None:
         """将下载后安装流程调度为后台任务，避免阻塞面板刷新。"""
@@ -4839,11 +4934,29 @@ class TianyiService:
         return _task_to_view(task)
 
     async def remove_task(self, task_id: str) -> Dict[str, Any]:
-        """移除任务。"""
+        """移除任务。
+
+        #16: 安装卡住、用户手动删掉安装文件/目录后，任务停留在 installing/installed 等
+        非下载态，原本调用 aria2.remove 会抛错导致"无法取消"。这里对 aria2 报错做容错，
+        并保证任何非下载态的任务都能被安全移除。
+        """
         task = self._find_task(task_id)
         if task is None:
             raise ValueError("任务不存在")
-        await self.aria2.remove(task.gid)
+
+        # 仅当任务仍处于 aria2 管理下的下载态时才尝试取消底层任务。
+        downloading = str(task.status or "").strip().lower() in {"active", "waiting", "paused"}
+        if downloading:
+            try:
+                await self.aria2.remove(task.gid)
+            except Exception as exc:
+                config.logger.warning("remove aria2 task failed (ignored): %s", exc)
+
+        # 清理可能仍在后台运行的安装后处理作业，避免移除后再次落盘。
+        job = self._post_process_jobs.get(task.task_id)
+        if job is not None and not job.done():
+            job.cancel()
+
         task.status = "removed"
         task.updated_at = _now_wall_ts()
         self._cleanup_tasks(self.store.tasks)
@@ -5183,6 +5296,7 @@ class TianyiService:
                 cover_landscape_url=cover_landscape,
                 cover_portrait_url=cover_portrait,
                 steam_app_id=steam_app_id,
+                restart_on_add=True,
             )
             if not result.get("ok"):
                 config.logger.warning(
@@ -5233,11 +5347,11 @@ class TianyiService:
                     if os.path.isfile(candidate):
                         return candidate
                     leaf = rel_parts[-1]
-                    matched_leaf = self._find_path_by_leaf_name(root, leaf, max_depth=8)
+                    matched_leaf = self._find_path_by_leaf_name(root, leaf, max_depth=10)
                     if matched_leaf:
                         return matched_leaf
 
-        fallback = self._find_first_executable_candidate(root, max_depth=8)
+        fallback = self._find_first_executable_candidate(root, max_depth=10)
         if fallback:
             return fallback
         return ""
@@ -5286,8 +5400,15 @@ class TianyiService:
                     ext_rank = 2
                 elif lower.endswith(".appimage"):
                     ext_rank = 3
+                elif lower.endswith(".so") or lower.endswith(".bin"):
+                    # 模拟器（如 M'D 等）常以内置 .so/.bin 启动器发布（#51）。
+                    ext_rank = 4
                 else:
-                    continue
+                    # 允许无扩展名的可执行文件（Linux ELF 启动器），但排在最后。
+                    if _looks_like_elf(os.path.join(dirpath, name)):
+                        ext_rank = 5
+                    else:
+                        continue
 
                 candidate = os.path.realpath(os.path.join(dirpath, name))
                 rank = (ext_rank, max(0, depth), len(candidate))
@@ -5296,6 +5417,15 @@ class TianyiService:
                     best_path = candidate
 
         return best_path
+
+    def _looks_like_elf(self, file_path: str) -> bool:
+        """粗略判断文件是否为 Linux ELF 可执行文件（无扩展名启动器）。"""
+        try:
+            with open(file_path, "rb") as fp:
+                magic = fp.read(4)
+            return magic[:4] == b"\x7fELF"
+        except Exception:
+            return False
 
     def _sanitize_path_segment(self, text: str) -> str:
         """清理路径片段，避免非法字符。"""

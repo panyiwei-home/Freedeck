@@ -6,7 +6,9 @@ import asyncio
 import binascii
 import os
 import re
+import shutil
 import struct
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,6 +21,52 @@ except Exception:
     vdf = None  # type: ignore[assignment]
 
 import config
+
+
+def _is_steam_running() -> bool:
+    """检测 Steam 进程是否正在运行（用于判断是否需要重启 Steam 才会显示快捷方式）。"""
+    try:
+        if shutil.which("pgrep") or os.path.exists("/proc"):
+            # Linux / SteamOS：按进程名判断
+            try:
+                out = subprocess.run(
+                    ["pgrep", "-x", "steam"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )
+                if out.returncode == 0 and out.stdout.strip():
+                    return True
+            except Exception:
+                pass
+        # Windows 回退
+        try:
+            out = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq steam.exe"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            if b"steam.exe" in out.stdout:
+                return True
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return False
+
+
+def _attempt_restart_steam() -> Dict[str, Any]:
+    """尽力重启 Steam，使新写入的 shortcuts.vdf 立即生效。失败仅记录，不阻断主流程。"""
+    if not _is_steam_running():
+        return {"ok": False, "message": "Steam 未运行，无需重启"}
+    try:
+        # 先优雅关闭，再由 steam 自身守护进程拉起（steam -shutdown 后通常会自动重启）。
+        subprocess.run(["steam", "-shutdown"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        return {"ok": True, "message": "已请求 Steam 重启"}
+    except Exception as exc:
+        config.logger.warning("Restart steam failed: %s", exc)
+        return {"ok": False, "message": f"重启 Steam 失败: {exc}（请手动重启）"}
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -78,6 +126,9 @@ def _detect_active_user(steam_root: str) -> str:
         config.logger.warning("Steam loginusers parse failed: %s", exc)
 
     # Fallback: latest mtime numeric user dir, excluding user 0.
+    # #50: 升级覆盖（0.3->0.6）后若登录态/account 映射变动，原回退逻辑可能选中一个
+    # 无 shortcuts.vdf 的账户，导致"加了但不显示"。这里额外要求该账户下确实存在
+    # config/shortcuts.vdf（或至少 config/ 目录），优先选"有真实 Steam 配置"的账户。
     candidates = []
     try:
         for name in os.listdir(userdata_root):
@@ -86,12 +137,32 @@ def _detect_active_user(steam_root: str) -> str:
             full = os.path.join(userdata_root, name)
             if not os.path.isdir(full):
                 continue
-            candidates.append((name, os.path.getmtime(full)))
+            cfg_dir = os.path.join(full, "config")
+            if not os.path.isdir(cfg_dir):
+                continue
+            # 有真实 Steam 配置目录才纳入候选。
+            score = os.path.getmtime(full)
+            candidates.append((name, score))
     except Exception:
         return ""
 
     if not candidates:
+        # 退一步：仍按 mtime 选非空账户，避免完全无法写入。
+        try:
+            fallback = []
+            for name in os.listdir(userdata_root):
+                if not name.isdigit() or name == "0":
+                    continue
+                full = os.path.join(userdata_root, name)
+                if os.path.isdir(full):
+                    fallback.append((name, os.path.getmtime(full)))
+            if fallback:
+                fallback.sort(key=lambda item: item[1], reverse=True)
+                return str(fallback[0][0])
+        except Exception:
+            pass
         return ""
+
     candidates.sort(key=lambda item: item[1], reverse=True)
     return str(candidates[0][0])
 
@@ -757,8 +828,14 @@ async def add_or_update_tianyi_shortcut(
     cover_logo_url: str = "",
     cover_icon_url: str = "",
     steam_app_id: int = 0,
+    restart_on_add: bool = False,
 ) -> Dict[str, Any]:
-    """Add/update shortcut, set Proton mapping, and write Steam grid assets."""
+    """Add/update shortcut, set Proton mapping, and write Steam grid assets.
+
+    restart_on_add: 写入完成后若 Steam 正在运行，则请求重启 Steam，
+    使新快捷方式立即出现在 Steam 游戏库中（#55 / #50：运行中添加的快捷方式
+    Steam 不会自动刷新，必须重扫 shortcuts.vdf）。
+    """
     shortcut = await asyncio.to_thread(
         _upsert_shortcut_sync,
         game_id=str(game_id or "").strip(),
@@ -803,9 +880,14 @@ async def add_or_update_tianyi_shortcut(
         icon_urls=icon_urls,
     )
 
+    steam_restart: Dict[str, Any] = {"ok": True, "requested": False, "message": "未请求重启"}
+    if restart_on_add:
+        steam_restart = _attempt_restart_steam()
+
     result = dict(shortcut)
     result["proton"] = proton
     result["artwork"] = artwork
+    result["steam_restart"] = steam_restart
     result["ok"] = bool(shortcut.get("ok"))
     return result
 

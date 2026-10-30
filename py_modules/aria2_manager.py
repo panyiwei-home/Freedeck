@@ -225,6 +225,11 @@ class Aria2Manager:
 
         raise Aria2Error(f"下载组件不可用，aria2 启动失败: {last_error}")
 
+    # 单任务到同一服务器的最大连接数上限。
+    # 原实现把 max-connection-per-server 直接等同于 split（最高 64），多任务并发时
+    # 会瞬间打开数百条 TCP 连接，在 ROG Ally / 部分 WiFi 网卡上会直接打崩 WiFi（#21）。
+    MAX_CONNECTIONS_PER_SERVER = 4
+
     async def add_uri(
         self,
         direct_url: str,
@@ -234,15 +239,18 @@ class Aria2Manager:
         split: int,
     ) -> str:
         """创建下载任务并返回 gid。"""
-        split = max(1, min(64, int(split)))
+        # split 仅控制"单文件拆分下载"的意愿，真正到同一服务器的连接数必须独立限流，
+        # 否则在高速下载（可跑满千兆）或并发任务下极易触发 WiFi 崩溃（#21）。
+        split = max(1, min(8, int(split)))
+        max_conn = min(max(1, split), self.MAX_CONNECTIONS_PER_SERVER)
         await self.ensure_running()
         options = {
             "dir": download_dir,
             "out": out_name,
             "header": [f"Cookie: {cookie}"],
             "split": str(split),
-            "max-connection-per-server": str(split),
-            "min-split-size": "1M",
+            "max-connection-per-server": str(max_conn),
+            "min-split-size": "10M",
             "continue": "true",
             "allow-overwrite": "true",
             "auto-file-renaming": "false",
@@ -279,6 +287,20 @@ class Aria2Manager:
             await self._rpc_call("aria2.removeDownloadResult", [gid])
         except Exception:
             pass
+
+    async def change_uri(self, gid: str, new_uri: str) -> int:
+        """替换下载任务的直链（用于直链过期后续传）。"""
+        # 先暂停，避免边下边换链导致 aria2 内部状态错乱。
+        try:
+            await self._rpc_call("aria2.forcePause", [gid])
+        except Exception:
+            pass
+        result = await self._rpc_call("aria2.changeUri", [gid, "0", "1", [new_uri]])
+        return int((result or [0])[0] if isinstance(result, list) else 0)
+
+    async def unpause(self, gid: str) -> None:
+        """恢复（续传）已暂停的任务。"""
+        await self._rpc_call("aria2.unpause", [gid])
 
     def stop(self) -> None:
         """停止 aria2 进程。"""

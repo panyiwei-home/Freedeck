@@ -63,6 +63,10 @@ interface InstalledState {
   preview: InstalledGameItem[];
 }
 
+// #18: 模块级缓存，供插件入口（在 React 组件外）读取"游玩时长统计"开关，
+// 决定是否挂载 Steam 游戏事件监听。
+let latestPlaytimeHookEnabled = true;
+
 interface TaskItem {
   task_id: string;
   game_id: string;
@@ -85,6 +89,7 @@ interface SettingsState {
   page_size: number;
   auto_delete_package: boolean;
   auto_install: boolean;
+  enable_playtime_hook: boolean;
 }
 
 interface PanelState {
@@ -103,6 +108,7 @@ interface SettingsPayload {
   page_size: number;
   auto_delete_package: boolean;
   auto_install: boolean;
+  enable_playtime_hook: boolean;
 }
 
 interface UrlResponse {
@@ -348,6 +354,7 @@ const EMPTY_SETTINGS: SettingsState = {
   page_size: 50,
   auto_delete_package: false,
   auto_install: true,
+  enable_playtime_hook: true,
 };
 
 const EMPTY_CLOUD_SAVE_STATE: CloudSaveUploadState = {
@@ -623,6 +630,7 @@ function toPayload(settings: SettingsState): SettingsPayload {
     page_size: Math.max(10, Math.min(200, Number(settings.page_size || 50))),
     auto_delete_package: Boolean(settings.auto_delete_package),
     auto_install: true,
+    enable_playtime_hook: Boolean(settings.enable_playtime_hook),
   };
 }
 
@@ -859,15 +867,28 @@ function installGlobalGameActionReporter(): () => void {
       });
     };
 
+    // #18: 回调内整体容错，避免其它插件（如 PlayTime）在同样的 Steam 钩子上抛错，
+    // 导致 Freedeck 的监听回调被连带中断，进而游戏启动/退出统计与事件上报异常。
+    const safeStart = (...args: unknown[]) => {
+      try {
+        reportAction("start", args);
+      } catch {
+        // 忽略单一事件回调异常，避免影响其它监听者（如 PlayTime）。
+      }
+    };
+    const safeEnd = (...args: unknown[]) => {
+      try {
+        reportAction("end", args);
+      } catch {
+        // 忽略单一事件回调异常。
+      }
+    };
+
     let startListener: { unregister?: () => void } | undefined;
     let endListener: { unregister?: () => void } | undefined;
     try {
-      startListener = registerStart((...args: unknown[]) => {
-        reportAction("start", args);
-      });
-      endListener = registerEnd((...args: unknown[]) => {
-        reportAction("end", args);
-      });
+      startListener = registerStart(safeStart);
+      endListener = registerEnd(safeEnd);
     } catch {
       scheduleRetry();
       return;
@@ -1649,6 +1670,7 @@ function SettingsPage() {
     }
     const next = Object.assign({}, EMPTY_SETTINGS, result.data.settings || {});
     setSettings(next);
+    latestPlaytimeHookEnabled = Boolean(next.enable_playtime_hook);
     setLogin(result.data.login || EMPTY_STATE.login);
     setSplitDraft(Math.max(1, Math.min(64, Number(next.split_count || 16))));
   }, []);
@@ -1768,6 +1790,7 @@ function SettingsPage() {
         }
         const next = Object.assign({}, EMPTY_SETTINGS, result.data || {});
         setSettings(next);
+        latestPlaytimeHookEnabled = Boolean(next.enable_playtime_hook);
         setSplitDraft(Math.max(1, Math.min(64, Number(next.split_count || 16))));
         toaster.toast({ title: "Freedeck", body: successMessage });
       } catch (error) {
@@ -2098,6 +2121,15 @@ function SettingsPage() {
                 description="仅在自动安装成功后生效"
                 checked={Boolean(settings.auto_delete_package)}
                 onChange={(value: boolean) => savePatch({ auto_delete_package: value })}
+                disabled={saving}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ToggleField
+                label="启用游玩时长统计"
+                description="监听 Steam 游戏启动/退出事件。与 PlayTime 等插件冲突导致启动报错时，可关闭此项规避（#18）"
+                checked={Boolean(settings.enable_playtime_hook)}
+                onChange={(value: boolean) => savePatch({ enable_playtime_hook: value })}
                 disabled={saving}
               />
             </PanelSectionRow>
@@ -2812,10 +2844,15 @@ export default definePlugin(() => {
   routerHook.addRoute(SETTINGS_ROUTE, SettingsPage);
   const unpatchLibraryPlaytime = installLibraryPlaytimePatch();
   let uninstallGameActionReporter = () => {};
-  try {
-    uninstallGameActionReporter = installGlobalGameActionReporter();
-  } catch {
-    // 忽略全局游戏事件监听初始化失败，避免影响插件主 UI。
+  // #18: 若用户在设置中关闭"游玩时长统计"，则不挂载 Steam 游戏事件监听，
+  // 避免与 PlayTime 等同类插件的钩子冲突导致启动报错。
+  const playtimeHookEnabled = latestPlaytimeHookEnabled;
+  if (playtimeHookEnabled) {
+    try {
+      uninstallGameActionReporter = installGlobalGameActionReporter();
+    } catch {
+      // 忽略全局游戏事件监听初始化失败，避免影响插件主 UI。
+    }
   }
 
   return {
